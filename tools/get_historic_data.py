@@ -17,23 +17,28 @@ def generate_filename(args):
         format_ext = 'json'
     elif args.format == 'pd':
         format_ext = 'pkl'
-    return f'data.{args.product}.{args.startdate}.GRAN{args.granularity}.{args.format}'
+    return f'data.{args.product}.{args.startdate}.GRAN{args.granularity}.{format_ext}'
 
 
 def main(args):
 
     data = []
-    date_range = pd.date_range(args.startdate, pd.Timestamp.now(),
-                               freq=f'{args.granularity * API_RESPONSE_LIMIT}S')
+    date_range = pd.date_range(
+        args.startdate,
+        pd.Timestamp.now(),
+        freq=f'{args.granularity * API_RESPONSE_LIMIT}S',
+    )
     date_range = date_range.to_pydatetime().tolist() + [datetime.datetime.now()]
 
     reversed_date_range = reversed(date_range)
     end = next(reversed_date_range)
     for start in tqdm(reversed_date_range, total=len(date_range)):
 
-        params = {'start': start.isoformat(),
-                  'end': end.isoformat(),
-                  'granularity': args.granularity}
+        params = {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'granularity': args.granularity,
+        }
 
         while True:
             response = requests.get(args.endpoint, params=params)
@@ -79,7 +84,7 @@ def test(args):
     filename = generate_filename(args)
 
     if args.format == 'json':
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(filename, encoding='utf-8') as f:
             data = json.load(f)
 
     elif args.format == 'pd':
@@ -91,7 +96,10 @@ def test(args):
     for i, dictum in enumerate(data[1:]):
         if last[0] - dictum[0] != args.granularity:
             counter += 1
-            print(f'Index: {i}\tDates: {datetime.datetime.fromtimestamp(dictum[0])} {datetime.datetime.fromtimestamp(last[0])}\tDifference: {last[0] - dictum[0]} s')
+            print(f'Index: {i}', end='\t')
+            print(f'Dates: {datetime.datetime.fromtimestamp(dictum[0])}', end=' ')
+            print(f'{datetime.datetime.fromtimestamp(last[0])}', end='\t')
+            print('Difference: {last[0] - dictum[0]} s')
         last = dictum
 
     print()
@@ -99,16 +107,35 @@ def test(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Download historic candlestick data from coinbase.')
-    parser.add_argument('--product', type=str, default='BTC-USD',
-                        help='Product ID in {Currency}-{Currency} format.')
-    parser.add_argument('--startdate', type=str, default='2016-01-01',
-                        help='The date from which onward the candles are gathered.')
-    parser.add_argument('--granularity', type=int, default=3600 * 24,
-                        choices=[60, 300, 900, 3600, 21600, 86400],
-                        help='Time window in seconds.')
-    parser.add_argument('--format', type=str, default='json', choices=['json', 'pd'],
-                        help='Requested format of the saved data.')
+    parser = argparse.ArgumentParser(
+        description='Download historic candlestick data from coinbase.'
+    )
+    parser.add_argument(
+        '--product',
+        type=str,
+        default='BTC-USD',
+        help='Product ID in {Currency}-{Currency} format.',
+    )
+    parser.add_argument(
+        '--startdate',
+        type=str,
+        default='2016-01-01',
+        help='The date from which onward the candles are gathered.',
+    )
+    parser.add_argument(
+        '--granularity',
+        type=int,
+        default=3600 * 24,
+        choices=[60, 300, 900, 3600, 21600, 86400],
+        help='Time window in seconds.',
+    )
+    parser.add_argument(
+        '--format',
+        type=str,
+        default='json',
+        choices=['json', 'pd'],
+        help='Requested format of the saved data.',
+    )
 
     args = parser.parse_args()
 

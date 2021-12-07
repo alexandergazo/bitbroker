@@ -3,19 +3,21 @@ from abc import abstractmethod
 from collections import namedtuple
 from enum import Enum
 
-from indicators import hma
-from indicators import hma_last_value
+import ephem
+import tensorflow as tf
+
+from .indicators import hma
+from .indicators import hma_last_value
 
 Balance = namedtuple('Balance', 'USD BTC')
 Desire = Enum('Desire', 'buy sell none')
 
 
 class Broker(ABC):
-    def __init__(self, available_data, hull_period, price_getter, fee=0):
+    def __init__(self, available_data, candle_getter, fee=0):
         self.available_data = available_data
-        self.hull_period = hull_period
         self.balance = Balance(1000, 0)
-        self.get_fresh_price = price_getter
+        self.get_fresh_candle = candle_getter
         self.history = [self.balance]
         self.fee = fee
 
@@ -28,8 +30,8 @@ class Broker(ABC):
 
     def run(self):
         while True:
-            new_price = self.get_fresh_price()
-            self.available_data.append(new_price)
+            new_candle = self.get_fresh_candle()
+            self.available_data.append(new_candle['Close'])
 
             desire = self._get_desire()
 
@@ -79,7 +81,57 @@ class NoLossBroker(Broker):
             self._buy()
 
 
+class AIBroker(Broker):
+    def __init__(self, model_path, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model = tf.keras.models.load_model(model_path)
+        self.offset = 0.00
+
+    def _get_desire(self, candle):
+        prediction = candle['prediction']
+        if prediction > 0.5 + self.offset:
+            return Desire.buy
+        elif prediction < 0.5 - self.offset:
+            return Desire.sell
+        else:
+            return Desire.none
+
+    def run(self):
+        while True:
+            new_candle = self.get_fresh_candle()
+            self.available_data.append(10 ** new_candle['log10close'])
+
+            desire = self._get_desire(new_candle)
+
+            self._act(desire)
+            self.history.append(self.balance)
+
+
+class AIRegressionBroker(Broker):
+    def __init__(self, model_path, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model = tf.keras.models.load_model(model_path)
+
+    def _get_desire(self, candle):
+        prediction = 10 ** candle['prediction']
+        return Desire.buy if prediction > self.available_data[-1] else Desire.sell
+
+    def run(self):
+        while True:
+            new_candle = self.get_fresh_candle()
+            self.available_data.append(10 ** new_candle['log10close'])
+
+            desire = self._get_desire(new_candle)
+
+            self._act(desire)
+            self.history.append(self.balance)
+
+
 class TestBroker(Broker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.available_data
+
     def _buy(self):
         self.balance = self._estimate_buy_balance()
 
@@ -87,7 +139,23 @@ class TestBroker(Broker):
         self.balance = self._estimate_sell_balance()
 
 
-class CrossoverHullBroker(Broker):
+class AbstractHullBroker(Broker):
+    def __init__(self, hull_period, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hull_period = hull_period
+
+
+class CrossoverHullBroker(AbstractHullBroker):
+    def _get_desire(self):
+        hma_fast = hma_last_value(self.available_data, self.hull_period)
+        hma_slow = hma_last_value(self.available_data, self.hull_period * 2)
+
+        desire = Desire.buy if hma_fast > hma_slow else Desire.sell
+
+        return desire
+
+
+class CrossoverInverseHullBroker(AbstractHullBroker):
     def _get_desire(self):
         hma_fast = hma_last_value(self.available_data, self.hull_period)
         hma_slow = hma_last_value(self.available_data, self.hull_period * 2)
@@ -97,26 +165,80 @@ class CrossoverHullBroker(Broker):
         return desire
 
 
-class JozefHullBroker(Broker):
+class CrossoverJozefComboHullBroker(AbstractHullBroker):
+    def _get_desire(self):
+        hma_fast = hma_last_value(self.available_data, self.hull_period)
+        hma_slow = hma_last_value(self.available_data, self.hull_period * 2)
+
+        desire = Desire.buy if hma_fast > hma_slow else Desire.sell
+
+        if desire == Desire.buy:
+            return Desire.none if self.available_data[-1] < hma_fast else Desire.buy
+        else:
+            return Desire.sell if self.available_data[-1] < hma_fast else Desire.none
+
+
+class SimpleHullBroker(AbstractHullBroker):
+    def _get_desire(self):
+        hma = hma_last_value(self.available_data, self.hull_period)
+
+        return Desire.sell if self.available_data[-1] < hma else Desire.buy
+
+
+class MoonBroker(AbstractHullBroker):
+    def _get_desire(self, candle):
+        if ephem.previous_full_moon(candle['Date']) < ephem.previous_new_moon(candle['Date']):
+            return Desire.buy
+        else:
+            return Desire.sell
+
+    def run(self):
+        while True:
+            new_candle = self.get_fresh_candle()
+            self.available_data.append(new_candle['Close'])
+
+            desire = self._get_desire(new_candle)
+
+            self._act(desire)
+            self.history.append(self.balance)
+
+
+class ReversedMoonBroker(MoonBroker):
+    def _get_desire(self, candle):
+        moon_desire = super()._get_desire(candle)
+        if moon_desire == Desire.sell:
+            return Desire.buy
+        elif moon_desire == Desire.buy:
+            return Desire.sell
+        else:
+            return Desire.none
+
+
+class JozefHullBroker(AbstractHullBroker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.trendUP = True
+        self.past_hma = hma(self.available_data, self.hull_period).tolist()
 
     def _get_desire(self):
 
         last_trend = self.trendUP
 
-        hull = hma(self.available_data, self.hull_period)
+        hma_value = hma_last_value(self.available_data, self.hull_period)
+        self.past_hma.append(hma_value)
 
-        if (hull[-1] > hull[-3]) and not self.trendUP:
-            self.trendUP = True
-        elif hull[-1] < hull[-3] and self.trendUP:
-            self.trendUP = False
+        self.trendUP = self.past_hma[-1] > self.past_hma[-3]
 
         if last_trend != self.trendUP:
-            return Desire.sell if self.available_data[-1] < hull[-1] else Desire.buy
+            return Desire.sell if self.available_data[-1] < self.past_hma[-1] else Desire.buy
 
         return Desire.none
+
+
+# TODO fix later to inherit only from broker
+class HoldlBroker(AbstractHullBroker):
+    def _get_desire(self):
+        return Desire.buy
 
 
 class TestCrossoverHullBroker(TestBroker, CrossoverHullBroker):
@@ -128,4 +250,28 @@ class TestNoLossCrossoverHullBroker(TestBroker, CrossoverHullBroker, NoLossBroke
 
 
 class TestJozefHullBroker(TestBroker, JozefHullBroker):
+    pass
+
+
+class TestHoldlBroker(TestBroker, HoldlBroker):
+    pass
+
+
+class TestSimpleHullBroker(TestBroker, SimpleHullBroker):
+    pass
+
+
+class TestMoonBroker(TestBroker, MoonBroker):
+    pass
+
+
+class TestReversedMoonBroker(TestBroker, ReversedMoonBroker):
+    pass
+
+
+class TestAIBroker(TestBroker, AIBroker):
+    pass
+
+
+class TestAIRegressionBroker(TestBroker, AIRegressionBroker):
     pass

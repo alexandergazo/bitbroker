@@ -1,9 +1,10 @@
 import json
-import pandas as pd
 import sys
 
+import pandas as pd
 
-with open(sys.argv[1], 'r', encoding='utf-8') as f:
+
+with open(sys.argv[1], encoding='utf-8') as f:
     data = json.load(f)
 
 filename = '.'.join(sys.argv[1].split('.')[:-1]) + '.pkl.xz'

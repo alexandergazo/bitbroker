@@ -10,17 +10,22 @@ from bitbroker.indicators import wma_last_value
 ohlc = pd.read_csv('tests/data/bittrex_btc-usdt.csv', index_col="date", parse_dates=True)
 
 
-@pytest.mark.parametrize("test_input, expected",
-                         [(([0, 0, 1], 3), [0.5]),
-                          (([0, 0, 1], 2), [0, 2/3]),
-                          (([0, 0, 1], 1), [0, 0, 1])])
+@pytest.mark.parametrize(
+    "test_input, expected",
+    [
+        (([0, 0, 1], 3), [0.5]),
+        (([0, 0, 1], 2), [0, 2 / 3]),
+        (([0, 0, 1], 1), [0, 0, 1]),
+    ],
+)
 def test_wma(test_input, expected):
     assert all(wma(*test_input) == expected)
 
 
-@pytest.mark.parametrize("test_input, expected",
-                         [(([1, 10, 100], 2), [13, 130]),
-                          (([1, 10, 100, 1000], 2), [13, 130, 1300])])
+@pytest.mark.parametrize(
+    "test_input, expected",
+    [(([1, 10, 100], 2), [13, 130]), (([1, 10, 100, 1000], 2), [13, 130, 1300])],
+)
 def test_hma(test_input, expected):
     result = hma(*test_input)
     assert all(result == expected)
@@ -46,19 +51,23 @@ def test_hma_last_value_long():
     assert result == expected
 
 
-@pytest.mark.parametrize("test_input, expected",
-                         [(([1, 0, 0], 2), 0),
-                          (([6, 0, 0], 3), 1),
-                          (([0, 0, 2], 3), 1),
-                          (([100, 10, 2], 3), 21)])
+@pytest.mark.parametrize(
+    "test_input, expected",
+    [
+        (([1, 0, 0], 2), 0),
+        (([6, 0, 0], 3), 1),
+        (([0, 0, 2], 3), 1),
+        (([100, 10, 2], 3), 21),
+    ],
+)
 def test_wma_last_value(test_input, expected):
     result = wma_last_value(*test_input)
     assert result == expected
 
 
-@pytest.mark.parametrize("test_input, expected",
-                         [(([1, 10, 100], 2), 130),
-                          (([1, 10, 100, 1000], 2), 1300)])
+@pytest.mark.parametrize(
+    "test_input, expected", [(([1, 10, 100], 2), 130), (([1, 10, 100, 1000], 2), 1300)]
+)
 def test_hma_last_value(test_input, expected):
     result = hma_last_value(*test_input)
     assert result == expected
